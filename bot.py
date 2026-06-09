@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 class VietnameseTTSBot(commands.Bot):
     def __init__(self) -> None:
-        intents = discord.Intents.default()
+        intents = discord.Intents.none() if settings.discord_intents_minimal else discord.Intents.default()
         intents.guilds = True
         intents.voice_states = True
 
@@ -39,6 +39,12 @@ class VietnameseTTSBot(commands.Bot):
         self.queue_manager = GuildQueueManager(
             tts_service=tts_service,
             audio_service=audio_service,
+        )
+        logger.info(
+            "Configured for max_tts_chars=%s, max_queue_size=%s, temp_dir=%s.",
+            settings.max_tts_chars,
+            settings.max_queue_size,
+            settings.audio_temp_dir,
         )
 
     async def setup_hook(self) -> None:
@@ -68,6 +74,7 @@ class VietnameseTTSBot(commands.Bot):
 
 async def async_main() -> None:
     validate_settings()
+    logger.info("Starting Discord TTS bot worker.")
 
     bot = VietnameseTTSBot()
     async with bot:

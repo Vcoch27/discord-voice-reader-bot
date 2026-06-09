@@ -2,74 +2,51 @@
 
 ## Overview
 
-Discord Vietnamese TTS Bot is a Python 3.12 background worker for Discord voice channels. It uses Microsoft Edge-TTS for Vietnamese speech, FFmpeg for audio playback, supports per-guild queues, and lets users choose female or male Vietnamese voices.
+This is a lightweight Discord Vietnamese TTS bot optimized for small containers such as Northflank `nf-compute-10`. It uses Microsoft Edge-TTS to generate Vietnamese speech, FFmpeg to stream audio into Discord voice channels, and bounded per-guild queues to keep memory predictable.
 
 ## Features
 
-- `/tts2 text:<message>` reads Vietnamese text in the user's current voice channel.
+- `/tts text:<message>` reads Vietnamese text in the user's current voice channel.
 - `/voice gender:<female|male>` changes the Vietnamese voice for the current server.
 - `/join` joins the user's current voice channel.
 - `/leave` disconnects the bot from voice.
 - `/stop` stops playback and clears the queue.
-- `/ping` health check.
-- Per-guild TTS queue to avoid overlapping playback.
-- Temporary audio files are deleted after playback.
+- `/ping` runtime health check.
+- Per-guild queue with configurable queue limit.
+- Configurable TTS text length limit.
+- Temporary audio cleanup after playback and on startup.
+- Low-resource configuration through environment variables.
 
-## Requirements
+## Resource Target
 
-- Python 3.12
-- FFmpeg
-- Discord bot token
-- Docker for container deployment
+- Minimum test target: `0.1 vCPU / 256 MB RAM`.
+- More stable target: `0.2 vCPU / 512 MB RAM`.
+- Runtime storage target: `1 GB`.
+- No public port is required because this is a Discord worker, not a web server.
 
-## Local Setup
-
-Create and activate a virtual environment:
-
-```powershell
-py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-```
-
-Install dependencies:
-
-```powershell
-pip install -r requirements.txt
-```
-
-Create a local `.env` file:
-
-```powershell
-Copy-Item .env.example .env
-```
-
-Edit `.env` and set a real Discord bot token:
-
-```env
-DISCORD_TOKEN=your_real_token_here
-```
-
-Run the bot:
-
-```powershell
-python main.py
-```
+The default limits are intentionally conservative: `MAX_TTS_CHARS=200`, `MAX_QUEUE_SIZE=3`, and `TTS_TIMEOUT_SECONDS=30`.
 
 ## Environment Variables
 
-Do not commit a real `.env` file to GitHub. Commit only `.env.example`.
+Never commit a real `.env` file. Commit only `.env.example`.
 
 | Name | Required | Default | Description |
 | --- | --- | --- | --- |
 | `DISCORD_TOKEN` | Yes | none | Discord bot token from the Discord Developer Portal. |
 | `COMMAND_PREFIX` | No | `!` | Prefix for classic commands if used. |
-| `FFMPEG_EXECUTABLE` | No | `ffmpeg` | FFmpeg executable name or path. Use `ffmpeg` for Docker and Northflank. A local Windows path is only for local development. |
+| `FFMPEG_EXECUTABLE` | No | `ffmpeg` | FFmpeg executable. Use `ffmpeg` on Docker/Northflank. A local Windows path is only acceptable in a local uncommitted `.env`. |
 | `LOG_LEVEL` | No | `INFO` | Python logging level. |
 | `TTS_RATE` | No | `+0%` | Edge-TTS speech rate. |
 | `TTS_VOLUME` | No | `+0%` | Edge-TTS speech volume. |
 | `TTS_PITCH` | No | `+0Hz` | Edge-TTS speech pitch. |
+| `MAX_TTS_CHARS` | No | `200` | Maximum characters per TTS request. Lower this if memory or CPU is tight. |
+| `MAX_QUEUE_SIZE` | No | `3` | Maximum queued TTS requests per guild, not counting active playback. |
+| `TTS_TIMEOUT_SECONDS` | No | `30` | Timeout for Edge-TTS generation. |
+| `AUDIO_TEMP_DIR` | No | `/tmp/discord-tts` | Directory for temporary audio files. |
+| `CLEANUP_TEMP_ON_START` | No | `true` | Delete stale `tts-*.mp3` files on startup. |
+| `DISCORD_INTENTS_MINIMAL` | No | `true` | Use minimal Discord intents for slash commands and voice state. |
 
-Example:
+Example `.env`:
 
 ```env
 DISCORD_TOKEN=your_discord_bot_token_here
@@ -79,49 +56,122 @@ LOG_LEVEL=INFO
 TTS_RATE=+0%
 TTS_VOLUME=+0%
 TTS_PITCH=+0Hz
+MAX_TTS_CHARS=200
+MAX_QUEUE_SIZE=3
+TTS_TIMEOUT_SECONDS=30
+AUDIO_TEMP_DIR=/tmp/discord-tts
+CLEANUP_TEMP_ON_START=true
+DISCORD_INTENTS_MINIMAL=true
 ```
 
-## Docker Setup
+## Local Setup Without Docker
 
-Build the image:
+Create and activate a virtual environment:
+
+```bash
+python -m venv .venv
+```
+
+Windows PowerShell:
 
 ```powershell
-docker build -t discord-vietnamese-tts-bot .
+.\.venv\Scripts\Activate.ps1
 ```
 
-Run with a local `.env` file:
+Linux/macOS:
+
+```bash
+source .venv/bin/activate
+```
+
+Install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+Create `.env` and edit `DISCORD_TOKEN`:
+
+```bash
+cp .env.example .env
+```
+
+On Windows, FFmpeg can be installed with:
 
 ```powershell
-docker run --rm --env-file .env discord-vietnamese-tts-bot
+winget install Gyan.FFmpeg
 ```
 
-The container does not expose a port because this bot is a Discord worker, not a web server.
+If needed for local Windows only, `FFMPEG_EXECUTABLE` may be an absolute local path in `.env`. Do not use a `C:/Users/...` path on Docker or Northflank.
 
-## Deploy On Northflank
+Run the bot:
 
-1. Create a Project on Northflank.
-2. Create a Service from the GitHub repository.
-3. Select branch `main`.
-4. Set Build type to `Dockerfile`.
-5. Set Dockerfile path to `./Dockerfile`.
-6. Do not configure a public port.
-7. Add runtime environment variables:
+```bash
+python main.py
+```
+
+## Local Test With Docker
+
+Build:
+
+```bash
+docker build -t discord-tts-bot .
+```
+
+Run with small runtime limits:
+
+```bash
+docker run --rm --env-file .env --memory=256m --cpus=0.1 discord-tts-bot
+```
+
+For a detached container:
+
+```bash
+docker run -d --name discord-tts-bot --env-file .env --memory=256m --cpus=0.1 discord-tts-bot
+docker logs -f discord-tts-bot
+```
+
+Docker Compose is optional for local testing:
+
+```bash
+docker compose up --build
+```
+
+## Northflank Deployment
+
+1. Push the cleaned repository to GitHub.
+2. Create a new Northflank project.
+3. Create a new Combined Service or Deployment Service from the GitHub repository.
+4. Select the `main` branch.
+5. Select Dockerfile build.
+6. Set Dockerfile path to `./Dockerfile`.
+7. Choose compute plan:
+   - Start with `nf-compute-10` for testing.
+   - If OOM or restarts occur, upgrade to `nf-compute-20`.
+8. Do not expose a public port.
+9. Add runtime variables or a secret group:
    - `DISCORD_TOKEN`
-   - `COMMAND_PREFIX`
-   - `FFMPEG_EXECUTABLE`
-   - `LOG_LEVEL`
-   - `TTS_RATE`
-   - `TTS_VOLUME`
-   - `TTS_PITCH`
-8. Set `FFMPEG_EXECUTABLE=ffmpeg` on Northflank.
-9. Deploy the service.
-10. Open logs and confirm the bot logs in successfully.
+   - `COMMAND_PREFIX=!`
+   - `FFMPEG_EXECUTABLE=ffmpeg`
+   - `LOG_LEVEL=INFO`
+   - `TTS_RATE=+0%`
+   - `TTS_VOLUME=+0%`
+   - `TTS_PITCH=+0Hz`
+   - `MAX_TTS_CHARS=200`
+   - `MAX_QUEUE_SIZE=3`
+   - `TTS_TIMEOUT_SECONDS=30`
+   - `AUDIO_TEMP_DIR=/tmp/discord-tts`
+   - `CLEANUP_TEMP_ON_START=true`
+   - `DISCORD_INTENTS_MINIMAL=true`
+10. Deploy.
+11. Open Northflank logs and verify successful Discord login.
+12. Test `/ping` and `/tts` in Discord.
 
 ## Discord Developer Portal Setup
 
 1. Open `https://discord.com/developers/applications`.
 2. Create an application and bot.
-3. Copy the bot token into `.env` locally or into `DISCORD_TOKEN` on Northflank.
+3. Copy the bot token into local `.env` or Northflank `DISCORD_TOKEN`.
 4. Go to OAuth2 URL Generator.
 5. Select scopes:
    - `bot`
@@ -137,22 +187,13 @@ No privileged gateway intents are required for the current code.
 
 ## Troubleshooting
 
-### DISCORD_TOKEN is required
+### Bot restarts or OOM
 
-The bot exits when `DISCORD_TOKEN` is missing or still set to a placeholder. Set a real token in `.env` locally or in Northflank runtime variables.
+Reduce `MAX_TTS_CHARS`, reduce `MAX_QUEUE_SIZE`, and keep `TTS_TIMEOUT_SECONDS` low. If restarts continue on `nf-compute-10`, upgrade to `nf-compute-20`.
 
 ### FFmpeg not found
 
-Install FFmpeg and make sure it is available in `PATH`.
-
-On Windows:
-
-```powershell
-winget install Gyan.FFmpeg
-ffmpeg -version
-```
-
-For Docker and Northflank, keep:
+Ensure the Dockerfile installs FFmpeg and set this on Northflank:
 
 ```env
 FFMPEG_EXECUTABLE=ffmpeg
@@ -160,28 +201,43 @@ FFMPEG_EXECUTABLE=ffmpeg
 
 Do not use a `C:/Users/...` FFmpeg path in Docker or Linux deployment.
 
-### Missing PyNaCl
+### Discord token missing
 
-Discord voice requires voice dependencies. This project includes:
+The bot exits with:
 
 ```text
-discord.py[voice]
-PyNaCl
+DISCORD_TOKEN is required. Set it locally in .env or in Northflank runtime variables.
 ```
 
-Reinstall dependencies:
+Set `DISCORD_TOKEN` in local `.env` or Northflank runtime variables.
 
-```powershell
-pip install -r requirements.txt
-```
+### Bot cannot join voice
 
-### Bot does not join a voice channel
+Check the user is already in a voice channel. Check bot permissions: `Connect`, `Speak`, and `Use Voice Activity`. Also confirm `PyNaCl` is installed from `requirements.txt`.
 
-Confirm the user is already in a voice channel before running the command. Also confirm the bot has `Connect`, `Speak`, and `Use Voice Activity` permissions for that server and channel.
+### Audio files are not deleted
+
+Check `AUDIO_TEMP_DIR` permissions. Docker creates `/tmp/discord-tts` and assigns it to the non-root `appuser`.
 
 ### Token leaked
 
-If `.env` or a real `DISCORD_TOKEN` was ever committed, rotate the token immediately in the Discord Developer Portal. Removing `.env` from the latest commit is not enough because Git history can still contain the secret. Rewrite history with `git filter-repo` or BFG, then force-push only after coordinating with anyone else using the repository.
+If `.env` or a real `DISCORD_TOKEN` was ever committed, reset the token immediately in the Discord Developer Portal. Removing `.env` from the latest commit does not remove it from Git history.
+
+## Useful Commands
+
+```bash
+python -m compileall .
+python scripts/sanity_check.py
+docker build -t discord-tts-bot .
+docker run --rm --env-file .env --memory=256m --cpus=0.1 discord-tts-bot
+docker ps
+docker logs -f discord-tts-bot
+docker stop discord-tts-bot
+git status
+git add .
+git commit -m "chore: optimize Discord TTS bot for low-resource deployment"
+git push origin main
+```
 
 ## Project Structure
 
@@ -192,7 +248,9 @@ discord-voice-reader-bot/
 |-- commands/
 |-- services/
 |-- config/
+|-- scripts/
 |-- Dockerfile
+|-- docker-compose.yml
 |-- .dockerignore
 |-- .env.example
 |-- requirements.txt

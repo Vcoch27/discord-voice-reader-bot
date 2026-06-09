@@ -15,8 +15,6 @@ class AudioService:
             executable=settings.ffmpeg_executable,
             source=str(file_path),
             before_options="-nostdin -hide_banner -loglevel warning",
-            # Removed loudnorm filter to prevent voice distortion
-            # Using -filter:a loudnorm=I=-16:TP=-1.5:LRA=11 can cause voice compression
             options="-vn -af \"volume=0.8\" -ar 48000 -ac 2",
         )
 
@@ -38,8 +36,17 @@ class AudioService:
             loop.call_soon_threadsafe(finished.set)
 
         source = self.create_audio_source(file_path)
-        voice_client.play(source, after=after)
-        await finished.wait()
+        try:
+            logger.info("Starting FFmpeg playback for %s.", file_path)
+            voice_client.play(source, after=after)
+            await finished.wait()
+            logger.info("Finished FFmpeg playback for %s.", file_path)
+        except asyncio.CancelledError:
+            if voice_client.is_playing() or voice_client.is_paused():
+                voice_client.stop()
+            raise
+        finally:
+            source.cleanup()
 
         if playback_error is not None:
             logger.error("FFmpeg playback failed: %s", playback_error)

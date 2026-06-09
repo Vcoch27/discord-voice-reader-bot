@@ -4,6 +4,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from config.settings import settings
 from services.queue_service import GuildQueueManager
 from services.tts_service import VoiceGender
 
@@ -15,18 +16,13 @@ class VoiceCommands(commands.Cog):
         self.bot = bot
         self.queue_manager = queue_manager
 
-    @app_commands.command(name="tts2", description="Read Vietnamese text aloud in your voice channel.")
+    @app_commands.command(name="tts", description="Read Vietnamese text aloud in your voice channel.")
     @app_commands.describe(text="Vietnamese text to read aloud.")
     async def tts(
         self,
         interaction: discord.Interaction,
         text: app_commands.Range[str, 1, 1000],
     ) -> None:
-        print("========== TTS COMMAND CALLED ==========")
-        print("USER =", interaction.user)
-        print("GUILD =", interaction.guild.id if interaction.guild else None)
-        print("TEXT =", text)
-        print("========================================")
         if interaction.guild is None:
             await interaction.response.send_message(
                 "This command can only be used in a server.",
@@ -41,8 +37,16 @@ class VoiceCommands(commands.Cog):
                 guild_id=interaction.guild.id,
                 voice_client=voice_client,
                 text=str(text),
+                user_id=interaction.user.id,
+                user_display_name=interaction.user.display_name,
             )
             voice_name = self.queue_manager.current_voice_name(interaction.guild.id)
+            logger.info(
+                "Accepted /tts request guild_id=%s user_id=%s chars=%s.",
+                interaction.guild.id,
+                interaction.user.id,
+                len(str(text)),
+            )
         except ValueError as exc:
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
@@ -64,7 +68,10 @@ class VoiceCommands(commands.Cog):
         if position == 1:
             message = f"Reading your message now.\nVoice: {voice_name}"
         else:
-            message = f"Queued your message at position {position}.\nVoice: {voice_name}"
+            message = (
+                f"Queued your message at position {position}.\n"
+                f"Voice: {voice_name}\nQueue limit: {settings.max_queue_size}"
+            )
 
         await interaction.response.send_message(message, ephemeral=True)
 

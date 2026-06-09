@@ -1,10 +1,12 @@
 import asyncio
 import logging
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 import discord
 
+from config.settings import settings
 from services.audio_service import AudioService
 from services.tts_service import EdgeTTSService, VOICE_BY_GENDER, VoiceGender
 
@@ -13,9 +15,11 @@ logger = logging.getLogger(__name__)
 
 @dataclass(slots=True)
 class TTSQueueItem:
-    voice_client: discord.VoiceClient
     text: str
+    user_id: int
+    user_display_name: str
     gender: VoiceGender
+    created_at: datetime
 
 
 class GuildTTSQueue:
@@ -28,20 +32,45 @@ class GuildTTSQueue:
         self.guild_id = guild_id
         self.tts_service = tts_service
         self.audio_service = audio_service
-        self.queue: asyncio.Queue[TTSQueueItem] = asyncio.Queue()
+        self.queue: asyncio.Queue[TTSQueueItem] = asyncio.Queue(maxsize=settings.max_queue_size)
         self.worker_task: asyncio.Task[None] | None = None
         self.stop_event = asyncio.Event()
         self.is_playing = False
         self.voice_gender = VoiceGender.FEMALE
+        self.voice_client: discord.VoiceClient | None = None
+        self.current_temp_file: Path | None = None
 
-    async def enqueue(self, voice_client: discord.VoiceClient, text: str) -> int:
+    async def enqueue(
+        self,
+        voice_client: discord.VoiceClient,
+        text: str,
+        user_id: int,
+        user_display_name: str,
+    ) -> int:
+        if len(text) > settings.max_tts_chars:
+            raise ValueError(f"TTS text must be {settings.max_tts_chars} characters or fewer.")
+
+        if self.queue.full():
+            logger.info("Guild %s: rejected TTS request because queue is full.", self.guild_id)
+            raise ValueError(f"The TTS queue is full. Try again after a message finishes playing.")
+
+        self.voice_client = voice_client
         item = TTSQueueItem(
-            voice_client=voice_client,
             text=text,
+            user_id=user_id,
+            user_display_name=user_display_name[:80],
             gender=self.voice_gender,
+            created_at=datetime.now(UTC),
         )
-        await self.queue.put(item)
+        self.queue.put_nowait(item)
         position = self.queue.qsize() + (1 if self.is_playing else 0)
+        logger.info(
+            "Guild %s: accepted TTS request from user_id=%s chars=%s position=%s.",
+            self.guild_id,
+            user_id,
+            len(text),
+            position,
+        )
 
         if self.worker_task is None or self.worker_task.done():
             self.stop_event.clear()
@@ -71,6 +100,10 @@ class GuildTTSQueue:
     async def stop(self) -> None:
         self.stop_event.set()
         self._clear_queue()
+        if self.voice_client is not None and (
+            self.voice_client.is_playing() or self.voice_client.is_paused()
+        ):
+            self.voice_client.stop()
 
         if self.worker_task is not None and not self.worker_task.done():
             self.worker_task.cancel()
@@ -80,6 +113,9 @@ class GuildTTSQueue:
                 pass
 
         self.worker_task = None
+        if self.current_temp_file is not None:
+            await self.tts_service.delete_temp_file(self.current_temp_file)
+            self.current_temp_file = None
 
     async def _worker(self) -> None:
         logger.info("Started TTS worker for guild %s.", self.guild_id)
@@ -87,7 +123,6 @@ class GuildTTSQueue:
         try:
             while not self.stop_event.is_set():
                 try:
-                    # Use wait_for with timeout to avoid infinite waiting
                     item = await asyncio.wait_for(
                         self.queue.get(),
                         timeout=1.0
@@ -101,26 +136,39 @@ class GuildTTSQueue:
 
                 try:
                     self.is_playing = True
-                    if item.voice_client.is_playing() or item.voice_client.is_paused():
-                        item.voice_client.stop()
+                    voice_client = self.voice_client
+                    if voice_client is None or not voice_client.is_connected():
+                        raise RuntimeError("Voice client is not connected.")
+
+                    if voice_client.is_playing() or voice_client.is_paused():
+                        voice_client.stop()
 
                     temp_file = await self.tts_service.synthesize(
                         text=item.text,
                         gender=item.gender,
                     )
-                    await self.audio_service.play(item.voice_client, temp_file)
-                    logger.debug("Successfully played TTS for guild %s with voice gender %s.", self.guild_id, item.gender)
+                    self.current_temp_file = temp_file
+                    await self.audio_service.play(voice_client, temp_file)
+                    logger.info(
+                        "Guild %s: completed TTS request from user_id=%s voice_gender=%s.",
+                        self.guild_id,
+                        item.user_id,
+                        item.gender,
+                    )
                 except asyncio.CancelledError:
-                    if item.voice_client.is_playing() or item.voice_client.is_paused():
-                        item.voice_client.stop()
+                    if self.voice_client is not None and (
+                        self.voice_client.is_playing() or self.voice_client.is_paused()
+                    ):
+                        self.voice_client.stop()
                     raise
                 except Exception:
                     logger.exception("Failed to process TTS queue item for guild %s.", self.guild_id)
                 finally:
                     self.is_playing = False
                     if temp_file is not None:
-                        # await self.tts_service.delete_temp_file(temp_file)
-                        print("TEMP FILE KEPT =", temp_file)
+                        await self.tts_service.delete_temp_file(temp_file)
+                        if self.current_temp_file == temp_file:
+                            self.current_temp_file = None
                     self.queue.task_done()
         finally:
             logger.info("Stopped TTS worker for guild %s.", self.guild_id)
@@ -149,9 +197,16 @@ class GuildQueueManager:
         guild_id: int,
         voice_client: discord.VoiceClient,
         text: str,
+        user_id: int,
+        user_display_name: str,
     ) -> int:
         guild_queue = self._get_or_create_queue(guild_id)
-        return await guild_queue.enqueue(voice_client=voice_client, text=text)
+        return await guild_queue.enqueue(
+            voice_client=voice_client,
+            text=text,
+            user_id=user_id,
+            user_display_name=user_display_name,
+        )
 
     def current_voice_name(self, guild_id: int) -> str:
         guild_queue = self._get_or_create_queue(guild_id)
