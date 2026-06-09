@@ -33,16 +33,12 @@ class EdgeTTSService:
         file_path = self.temp_dir / f"tts-{uuid4().hex}.mp3"
 
         try:
-            # communicate = edge_tts.Communicate(
-            #     text=text,
-            #     voice=voice_name,
-            #     rate=settings.tts_rate,
-            #     volume=settings.tts_volume,
-            #     pitch=settings.tts_pitch,
-            # )
             communicate = edge_tts.Communicate(
                 text=text,
-                voice="vi-VN-HoaiMyNeural",
+                voice=voice_name,
+                rate=settings.tts_rate,
+                volume=settings.tts_volume,
+                pitch=settings.tts_pitch,
             )
 
             logger.info(

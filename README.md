@@ -1,142 +1,75 @@
 # Vietnamese Discord TTS Bot
 
-A Python 3.12 Discord voice bot that reads Vietnamese text naturally with Microsoft Edge-TTS.
+## Overview
 
-The bot no longer uses gTTS. Vietnamese speech is generated with Edge-TTS neural voices:
-
-- Female: `vi-VN-HoaiMyNeural`
-- Male: `vi-VN-NamMinhNeural`
+Discord Vietnamese TTS Bot is a Python 3.12 background worker for Discord voice channels. It uses Microsoft Edge-TTS for Vietnamese speech, FFmpeg for audio playback, supports per-guild queues, and lets users choose female or male Vietnamese voices.
 
 ## Features
 
-- `/tts text:<message>` reads Vietnamese text in your current voice channel.
+- `/tts2 text:<message>` reads Vietnamese text in the user's current voice channel.
 - `/voice gender:<female|male>` changes the Vietnamese voice for the current server.
-- `/join` joins your current voice channel.
-- `/leave` disconnects from voice.
-- `/stop` stops playback immediately and clears the server queue.
+- `/join` joins the user's current voice channel.
+- `/leave` disconnects the bot from voice.
+- `/stop` stops playback and clears the queue.
 - `/ping` health check.
-- Automatically joins the user's voice channel for TTS.
-- Prevents overlapping playback.
-- Queues TTS messages per Discord server.
-- Deletes temporary audio files after playback.
-- Uses FFmpeg playback settings tuned for Discord voice.
+- Per-guild TTS queue to avoid overlapping playback.
+- Temporary audio files are deleted after playback.
 
 ## Requirements
 
 - Python 3.12
-- FFmpeg installed and available in `PATH`
+- FFmpeg
 - Discord bot token
+- Docker for container deployment
 
-## Setup on Windows
+## Local Setup
 
-1. Create and activate a virtual environment:
+Create and activate a virtual environment:
 
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 ```
 
-2. Install dependencies:
+Install dependencies:
 
 ```powershell
 pip install -r requirements.txt
 ```
 
-3. Create `.env`:
+Create a local `.env` file:
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-4. Add your Discord token to `.env`:
+Edit `.env` and set a real Discord bot token:
 
 ```env
 DISCORD_TOKEN=your_real_token_here
 ```
 
-5. Run the bot:
+Run the bot:
 
 ```powershell
 python main.py
 ```
 
-You can also run:
+## Environment Variables
 
-```powershell
-python bot.py
-```
+Do not commit a real `.env` file to GitHub. Commit only `.env.example`.
 
-## FFmpeg on Windows
+| Name | Required | Default | Description |
+| --- | --- | --- | --- |
+| `DISCORD_TOKEN` | Yes | none | Discord bot token from the Discord Developer Portal. |
+| `COMMAND_PREFIX` | No | `!` | Prefix for classic commands if used. |
+| `FFMPEG_EXECUTABLE` | No | `ffmpeg` | FFmpeg executable name or path. Use `ffmpeg` for Docker and Northflank. A local Windows path is only for local development. |
+| `LOG_LEVEL` | No | `INFO` | Python logging level. |
+| `TTS_RATE` | No | `+0%` | Edge-TTS speech rate. |
+| `TTS_VOLUME` | No | `+0%` | Edge-TTS speech volume. |
+| `TTS_PITCH` | No | `+0Hz` | Edge-TTS speech pitch. |
 
-Install with winget:
-
-```powershell
-winget install Gyan.FFmpeg
-```
-
-Close and reopen PowerShell, then verify:
-
-```powershell
-ffmpeg -version
-```
-
-Manual install:
-
-1. Download FFmpeg from `https://www.gyan.dev/ffmpeg/builds/`.
-2. Extract it to a folder such as `C:\ffmpeg`.
-3. Add `C:\ffmpeg\bin` to your Windows `PATH`.
-4. Reopen PowerShell and run `ffmpeg -version`.
-
-If FFmpeg is not in `PATH`, set the exact executable path in `.env`:
-
-```env
-FFMPEG_EXECUTABLE=C:\ffmpeg\bin\ffmpeg.exe
-```
-
-## Discord Developer Portal Setup
-
-1. Open `https://discord.com/developers/applications`.
-2. Create a new application.
-3. Go to **Bot** and create a bot.
-4. Copy the bot token into `.env`.
-5. Go to **OAuth2** -> **URL Generator**.
-6. Select scopes:
-   - `bot`
-   - `applications.commands`
-7. Select bot permissions:
-   - `Connect`
-   - `Speak`
-   - `Use Voice Activity`
-   - `Send Messages`
-8. Open the generated invite URL and add the bot to your server.
-
-No privileged gateway intents are required.
-
-## Usage
-
-Join a voice channel, then run:
-
-```text
-/voice gender:female
-/tts text:Xin chao moi nguoi, hom nay ban the nao?
-```
-
-Switch to the male voice:
-
-```text
-/voice gender:male
-/tts text:Day la giong nam tieng Viet tu Edge TTS.
-```
-
-Stop playback:
-
-```text
-/stop
-```
-
-## Configuration
-
-`.env` values:
+Example:
 
 ```env
 DISCORD_TOKEN=your_discord_bot_token_here
@@ -148,35 +81,121 @@ TTS_VOLUME=+0%
 TTS_PITCH=+0Hz
 ```
 
-For the most natural Vietnamese, keep the default rate and pitch:
+## Docker Setup
 
-```env
-TTS_RATE=+0%
-TTS_PITCH=+0Hz
+Build the image:
+
+```powershell
+docker build -t discord-vietnamese-tts-bot .
 ```
 
-You can slightly lower the speed for clearer pronunciation:
+Run with a local `.env` file:
+
+```powershell
+docker run --rm --env-file .env discord-vietnamese-tts-bot
+```
+
+The container does not expose a port because this bot is a Discord worker, not a web server.
+
+## Deploy On Northflank
+
+1. Create a Project on Northflank.
+2. Create a Service from the GitHub repository.
+3. Select branch `main`.
+4. Set Build type to `Dockerfile`.
+5. Set Dockerfile path to `./Dockerfile`.
+6. Do not configure a public port.
+7. Add runtime environment variables:
+   - `DISCORD_TOKEN`
+   - `COMMAND_PREFIX`
+   - `FFMPEG_EXECUTABLE`
+   - `LOG_LEVEL`
+   - `TTS_RATE`
+   - `TTS_VOLUME`
+   - `TTS_PITCH`
+8. Set `FFMPEG_EXECUTABLE=ffmpeg` on Northflank.
+9. Deploy the service.
+10. Open logs and confirm the bot logs in successfully.
+
+## Discord Developer Portal Setup
+
+1. Open `https://discord.com/developers/applications`.
+2. Create an application and bot.
+3. Copy the bot token into `.env` locally or into `DISCORD_TOKEN` on Northflank.
+4. Go to OAuth2 URL Generator.
+5. Select scopes:
+   - `bot`
+   - `applications.commands`
+6. Select bot permissions:
+   - `Connect`
+   - `Speak`
+   - `Use Voice Activity`
+   - `Send Messages`
+7. Open the generated invite URL and add the bot to your server.
+
+No privileged gateway intents are required for the current code.
+
+## Troubleshooting
+
+### DISCORD_TOKEN is required
+
+The bot exits when `DISCORD_TOKEN` is missing or still set to a placeholder. Set a real token in `.env` locally or in Northflank runtime variables.
+
+### FFmpeg not found
+
+Install FFmpeg and make sure it is available in `PATH`.
+
+On Windows:
+
+```powershell
+winget install Gyan.FFmpeg
+ffmpeg -version
+```
+
+For Docker and Northflank, keep:
 
 ```env
-TTS_RATE=-5%
+FFMPEG_EXECUTABLE=ffmpeg
 ```
+
+Do not use a `C:/Users/...` FFmpeg path in Docker or Linux deployment.
+
+### Missing PyNaCl
+
+Discord voice requires voice dependencies. This project includes:
+
+```text
+discord.py[voice]
+PyNaCl
+```
+
+Reinstall dependencies:
+
+```powershell
+pip install -r requirements.txt
+```
+
+### Bot does not join a voice channel
+
+Confirm the user is already in a voice channel before running the command. Also confirm the bot has `Connect`, `Speak`, and `Use Voice Activity` permissions for that server and channel.
+
+### Token leaked
+
+If `.env` or a real `DISCORD_TOKEN` was ever committed, rotate the token immediately in the Discord Developer Portal. Removing `.env` from the latest commit is not enough because Git history can still contain the secret. Rewrite history with `git filter-repo` or BFG, then force-push only after coordinating with anyone else using the repository.
 
 ## Project Structure
 
 ```text
-discord-tts-bot/
-├── main.py
-├── bot.py
-├── commands/
-│   ├── voice.py
-│   └── utility.py
-├── services/
-│   ├── tts_service.py
-│   ├── audio_service.py
-│   └── queue_service.py
-├── config/
-│   └── settings.py
-├── .env.example
-├── requirements.txt
-└── README.md
+discord-voice-reader-bot/
+|-- main.py
+|-- bot.py
+|-- commands/
+|-- services/
+|-- config/
+|-- Dockerfile
+|-- .dockerignore
+|-- .env.example
+|-- requirements.txt
+|-- README.md
+`-- VOICE_ISSUES_AND_FIXES.md
 ```

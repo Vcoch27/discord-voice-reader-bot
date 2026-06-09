@@ -9,7 +9,7 @@ import edge_tts
 
 from commands.utility import UtilityCommands
 from commands.voice import VoiceCommands
-from config.settings import settings
+from config.settings import settings, validate_settings
 from services.audio_service import AudioService
 from services.queue_service import GuildQueueManager
 from services.tts_service import EdgeTTSService, VOICE_BY_GENDER, VoiceGender
@@ -67,8 +67,7 @@ class VietnameseTTSBot(commands.Bot):
 
 
 async def async_main() -> None:
-    if not settings.discord_token:
-        raise RuntimeError("DISCORD_TOKEN is missing. Add it to your .env file.")
+    validate_settings()
 
     bot = VietnameseTTSBot()
     async with bot:

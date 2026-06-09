@@ -6,6 +6,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+TOKEN_PLACEHOLDERS = {
+    "YOUR_TOKEN_HERE",
+    "your_discord_bot_token_here",
+    "DISCORD_TOKEN=YOUR_TOKEN_HERE",
+}
+
 
 @dataclass(frozen=True, slots=True)
 class Settings:
@@ -19,3 +25,10 @@ class Settings:
 
 
 settings = Settings()
+
+
+def validate_settings() -> None:
+    if not settings.discord_token or settings.discord_token in TOKEN_PLACEHOLDERS:
+        raise RuntimeError(
+            "DISCORD_TOKEN is required. Set it in your .env locally or in Northflank runtime variables."
+        )
